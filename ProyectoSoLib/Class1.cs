@@ -8,5 +8,6 @@ namespace ProyectoSoLib
 {
     public class Class1
     {
+        string eric = "EL ERIC ES RETRASADO";
     }
 }
