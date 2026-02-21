@@ -6,8 +6,7 @@ using System.Threading.Tasks;
 
 namespace ProyectoSoLib
 {
-    public class Class1
+    internal class Tablero
     {
-        string eric = "EL ERIC ES RETRASADO";
     }
 }
