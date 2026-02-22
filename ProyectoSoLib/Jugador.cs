@@ -29,14 +29,64 @@ namespace ProyectoSoLib
     */
     public class Jugador
     {
-        string id;
-        string color;
-        List<Ficha> fichas = new List<Ficha>();
-        int fichasEnBase;
-        int fichasEnMeta;
-        Casilla casillaSalida;
-        Casilla 
+        private string id;
+        private string nombre;
+        private string color;
+        private List<Ficha> fichas = new List<Ficha>();
+        private int puntuacion;
 
+        public Jugador(string id, string nombre, string color)
+        {
+            this.id = id;
+            this.nombre = nombre;
+            this.color = color;
+            this.puntuacion = 0;
+            // Solo creamos 1 ficha para simplificar el juego
+            Ficha unaFicha = new Ficha(color, id + "_F1");
+            fichas.Add(unaFicha);
+        }
 
+        public string GetId()
+        {
+            return id;
+        }
+
+        public string GetNombre()
+        {
+            return nombre;
+        }
+
+        public string GetColor()
+        {
+            return color;
+        }
+
+        public List<Ficha> GetFichas()
+        {
+            return fichas;
+        }
+
+        public int GetPuntuacion()
+        {
+            return puntuacion;
+        }
+
+        public void AddPuntuacion(int puntos)
+        {
+            puntuacion = puntuacion + puntos;
+        }
+
+        public int GetFichasEnMeta()
+        {
+            int contador = 0;
+            foreach (Ficha f in fichas)
+            {
+                if (f.GetEstado() == "meta")
+                {
+                    contador = contador + 1;
+                }
+            }
+            return contador;
+        }
     }
 }

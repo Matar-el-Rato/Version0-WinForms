@@ -12,9 +12,9 @@ namespace ProyectoSoLib
     {
         private static Random random = new Random();
 
-        public static (int, int) LanzarDados()
+        public static int Lanzar()
         {
-            return (random.Next(1, 7), random.Next(1, 7));
+            return random.Next(1, 7);
         }
     }
 }
