@@ -13,6 +13,7 @@ namespace ProyectoSoLib
         public Tablero()
         {
             InitializeBoard();
+            //Hola
         }
 
         private void InitializeBoard()
