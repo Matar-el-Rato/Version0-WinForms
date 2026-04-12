@@ -13,6 +13,14 @@ namespace ProyectoSO_Forms
     ///
     /// All networking (connect, handshake, listen) runs on a single
     /// dedicated thread so the UI thread is never blocked.
+    ///
+    /// MUTUAL EXCLUSION:
+    /// _client is shared between two threads:
+    ///   - The UI thread calls Disconnect(), which does _client.Close() and sets it to null.
+    ///   - The network thread reads from _client's NetworkStream in ListenerLoop().
+    /// Without the lock, Disconnect() could Close() and null _client while the network
+    /// thread is mid-read, causing a race condition. The lock(_lock) ensures only one
+    /// thread touches _client at a time.
     /// </summary>
     public static class LiveConnectionManager
     {
@@ -21,8 +29,12 @@ namespace ProyectoSO_Forms
         private const int MaxUsername = 12;
         private const int MaxClients = 64;
 
+        // Protects _client from concurrent access between the UI thread
+        // (Disconnect) and the network thread (NetworkThreadMain/ListenerLoop).
         private static readonly object _lock = new object();
+
         private static volatile bool _running = false;
+
         private static TcpClient _client;
         private static Thread _networkThread;
 
@@ -42,14 +54,17 @@ namespace ProyectoSO_Forms
         /// <summary>
         /// Opens a persistent connection on a dedicated thread and starts
         /// listening for server-push messages. If already connected,
-        /// disconnects cleanly first.
+        /// disconnects cleanly first to prevent two threads running at once.
         /// </summary>
         public static void Connect(string host, int port, string username, int userId)
         {
+            // Guard against double-connect: if a previous session is still
+            // alive, shut it down before starting a new one.
             Disconnect();
 
             _running = true;
 
+            // All networking runs on this single dedicated thread.
             _networkThread = new Thread(() => NetworkThreadMain(host, port, username, userId))
             {
                 IsBackground = true,
@@ -64,8 +79,14 @@ namespace ProyectoSO_Forms
         /// </summary>
         public static void Disconnect()
         {
+            // Signal the network thread to stop. volatile ensures the
+            // thread sees this change on its next loop iteration.
             _running = false;
 
+            // LOCK: Close _client under the lock so we don't race with
+            // the network thread which may be reading from the stream.
+            // Closing the socket causes the blocked Read() in ListenerLoop
+            // to throw an exception, which is the intended shutdown signal.
             lock (_lock)
             {
                 if (_client != null)
@@ -75,6 +96,9 @@ namespace ProyectoSO_Forms
                 }
             }
 
+            // Wait for the network thread to finish. The 2s timeout is a
+            // safety net in case the thread is stuck in a blocking read
+            // that Close() didn't unblock (unlikely but defensive).
             if (_networkThread != null && _networkThread.IsAlive)
                 _networkThread.Join(2000);
             _networkThread = null;
@@ -113,6 +137,9 @@ namespace ProyectoSO_Forms
 
                 client.GetStream().Write(packet, 0, packet.Length);
 
+                // LOCK: publish the TcpClient reference so Disconnect() on
+                // the UI thread can find and close it. Without the lock,
+                // Disconnect() could read a half-written _client pointer.
                 lock (_lock)
                 {
                     _client = client;
@@ -137,6 +164,8 @@ namespace ProyectoSO_Forms
             var headerBuf = new byte[2];
             var usersBuf = new byte[MaxClients * MaxUsername];
 
+            // _running is volatile: checked every iteration without locking.
+            // Set to false by Disconnect() on the UI thread.
             while (_running)
             {
                 if (!ReadExact(stream, headerBuf, 2)) break;
