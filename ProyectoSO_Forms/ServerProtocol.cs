@@ -19,6 +19,7 @@ namespace ProyectoSO_Forms
         public ServerResponseCode Code { get; set; }
         public string Message { get; set; } = "";
         public int UserId { get; set; } = -1;
+        public int SkinId { get; set; } = 101;
     }
 
     public static class ServerProtocol
@@ -45,14 +46,23 @@ namespace ProyectoSO_Forms
             var result = SendCredentials(host, port, REQ_LOGIN, username, password);
             if (!result.IsSuccess) return result;
 
-            // If response is success and message contains ID, parse it
+            // Parse "...ID <n> SKIN <n>" from the server message
             var msg = result.Message ?? string.Empty;
             var idIdx = msg.IndexOf("ID ", StringComparison.OrdinalIgnoreCase);
             if (idIdx >= 0)
             {
-                var idPart = msg.Substring(idIdx + 3).Trim();
-                if (int.TryParse(idPart, out var id))
+                var afterId = msg.Substring(idIdx + 3);
+                var parts = afterId.Trim().Split(' ');
+                if (parts.Length > 0 && int.TryParse(parts[0], out var id))
                     result.UserId = id;
+            }
+
+            var skinIdx = msg.IndexOf("SKIN ", StringComparison.OrdinalIgnoreCase);
+            if (skinIdx >= 0)
+            {
+                var skinPart = msg.Substring(skinIdx + 5).Trim();
+                if (int.TryParse(skinPart, out var skinId))
+                    result.SkinId = skinId;
             }
 
             return result;

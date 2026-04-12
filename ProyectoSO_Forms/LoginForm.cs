@@ -47,7 +47,7 @@ namespace ProyectoSO_Forms
             }
 
             lblStatus.Text = "Login successful!";
-            var mainForm = new Form1(result.UserId, username);
+            var mainForm = new Form1(result.UserId, username, result.SkinId);
             this.Hide();
             mainForm.ShowDialog();
             this.Close();
