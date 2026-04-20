@@ -21,6 +21,7 @@ namespace ProyectoSO_Forms
         private void InitializeComponent()
         {
             this.lblWelcome      = new System.Windows.Forms.Label();
+            this.btnLogout       = new System.Windows.Forms.Button();
             this.lblSkin         = new System.Windows.Forms.Label();
             this.numericSkin     = new System.Windows.Forms.NumericUpDown();
             this.btnUpdateSkin   = new System.Windows.Forms.Button();
@@ -47,6 +48,19 @@ namespace ProyectoSO_Forms
             this.lblWelcome.Size = new System.Drawing.Size(115, 17);
             this.lblWelcome.TabIndex = 0;
             this.lblWelcome.Text = "Logged in as...";
+            //
+            // btnLogout
+            //
+            this.btnLogout.Location = new System.Drawing.Point(300, 15);
+            this.btnLogout.Name = "btnLogout";
+            this.btnLogout.Size = new System.Drawing.Size(88, 25);
+            this.btnLogout.TabIndex = 13;
+            this.btnLogout.Text = "Log Out";
+            this.btnLogout.BackColor = System.Drawing.Color.FromArgb(180, 60, 40);
+            this.btnLogout.ForeColor = System.Drawing.Color.White;
+            this.btnLogout.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnLogout.UseVisualStyleBackColor = false;
+            this.btnLogout.Click += new System.EventHandler(this.btnLogout_Click);
             //
             // lblSkin
             //
@@ -186,6 +200,7 @@ namespace ProyectoSO_Forms
             this.Controls.Add(this.btnUpdateSkin);
             this.Controls.Add(this.numericSkin);
             this.Controls.Add(this.lblSkin);
+            this.Controls.Add(this.btnLogout);
             this.Controls.Add(this.lblWelcome);
             this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
@@ -201,6 +216,7 @@ namespace ProyectoSO_Forms
         }
 
         private System.Windows.Forms.Label       lblWelcome;
+        private System.Windows.Forms.Button      btnLogout;
         private System.Windows.Forms.Label       lblSkin;
         private System.Windows.Forms.NumericUpDown numericSkin;
         private System.Windows.Forms.Button      btnUpdateSkin;

@@ -50,6 +50,16 @@ namespace ProyectoSO_Forms
             var mainForm = new Form1(result.UserId, username, result.SkinId);
             this.Hide();
             mainForm.ShowDialog();
+
+            if (mainForm.LoggedOut)
+            {
+                lblStatus.Text = "";
+                txtUsername.Clear();
+                txtPassword.Clear();
+                this.Show();
+                return;
+            }
+
             this.Close();
         }
 

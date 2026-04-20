@@ -7,6 +7,8 @@ namespace ProyectoSO_Forms
 {
     public partial class Form1 : Form
     {
+        public bool LoggedOut { get; private set; } = false;
+
         private readonly int    _userId;
         private readonly string _username;
         private readonly int    _skinId;
@@ -59,6 +61,17 @@ namespace ProyectoSO_Forms
             LiveConnectionManager.OnChatMessageReceived -= OnChatMessageReceived;
             LiveConnectionManager.OnRoomStateUpdated   -= OnRoomStateUpdated;
             LiveConnectionManager.Disconnect();
+        }
+
+        private void btnLogout_Click(object sender, EventArgs e)
+        {
+            LoggedOut = true;
+            LiveConnectionManager.SendLogout();
+            LiveConnectionManager.OnUserListUpdated    -= OnUserListUpdated;
+            LiveConnectionManager.OnChatMessageReceived -= OnChatMessageReceived;
+            LiveConnectionManager.OnRoomStateUpdated   -= OnRoomStateUpdated;
+            LiveConnectionManager.Disconnect();
+            this.Close();
         }
 
         // ── Room panel construction ───────────────────────────────────────────────

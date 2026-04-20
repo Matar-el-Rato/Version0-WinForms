@@ -27,6 +27,7 @@ namespace ProyectoSO_Forms
     public static class LiveConnectionManager
     {
         private const byte ReqConnectLive  = 9;
+        private const byte ReqLogout       = 4;
         private const byte ReqSendChat     = 6;
         private const byte ReqJoinRoom     = 5;
         private const byte ReqLeaveRoom    = 8;
@@ -128,6 +129,20 @@ namespace ProyectoSO_Forms
             if (_networkThread != null && _networkThread.IsAlive)
                 _networkThread.Join(2000);
             _networkThread = null;
+        }
+
+        /// <summary>
+        /// Sends REQ_LOGOUT on the live connection so the server removes this client
+        /// gracefully before we close the socket. Safe to call when not connected.
+        /// </summary>
+        public static void SendLogout()
+        {
+            NetworkStream stream;
+            lock (_lock) { stream = _stream; }
+            if (stream == null) return;
+
+            var packet = new byte[] { ReqLogout };
+            try { stream.Write(packet, 0, packet.Length); } catch { }
         }
 
         /// <summary>Sends REQ_JOIN_ROOM on the live connection. roomId must be 1-3.</summary>
