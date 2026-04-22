@@ -31,6 +31,7 @@ namespace ProyectoSO_Forms
             this.btnLogin = new System.Windows.Forms.Button();
             this.btnRegister = new System.Windows.Forms.Button();
             this.lblStatus = new System.Windows.Forms.Label();
+            this.DebugButton = new System.Windows.Forms.Button();
             this.SuspendLayout();
             // 
             // lblTitle
@@ -39,7 +40,7 @@ namespace ProyectoSO_Forms
             this.lblTitle.Font = new System.Drawing.Font("Microsoft Sans Serif", 12F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
             this.lblTitle.Location = new System.Drawing.Point(28, 20);
             this.lblTitle.Name = "lblTitle";
-            this.lblTitle.Size = new System.Drawing.Size(172, 20);
+            this.lblTitle.Size = new System.Drawing.Size(167, 20);
             this.lblTitle.TabIndex = 0;
             this.lblTitle.Text = "Matar el Rato Login";
             // 
@@ -106,11 +107,23 @@ namespace ProyectoSO_Forms
             this.lblStatus.Size = new System.Drawing.Size(0, 13);
             this.lblStatus.TabIndex = 7;
             // 
+            // DebugButton
+            // 
+            this.DebugButton.BackColor = System.Drawing.SystemColors.ActiveBorder;
+            this.DebugButton.Location = new System.Drawing.Point(12, 210);
+            this.DebugButton.Name = "DebugButton";
+            this.DebugButton.Size = new System.Drawing.Size(50, 28);
+            this.DebugButton.TabIndex = 8;
+            this.DebugButton.Text = "Debug";
+            this.DebugButton.UseVisualStyleBackColor = false;
+            this.DebugButton.Click += new System.EventHandler(this.buttonDebug_Click);
+            // 
             // LoginForm
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(290, 250);
+            this.Controls.Add(this.DebugButton);
             this.Controls.Add(this.lblStatus);
             this.Controls.Add(this.btnRegister);
             this.Controls.Add(this.btnLogin);
@@ -126,6 +139,9 @@ namespace ProyectoSO_Forms
             this.Text = "Login";
             this.ResumeLayout(false);
             this.PerformLayout();
+
         }
+
+        private System.Windows.Forms.Button DebugButton;
     }
 }

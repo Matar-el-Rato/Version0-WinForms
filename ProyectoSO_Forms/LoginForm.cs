@@ -1,5 +1,6 @@
 using System;
 using System.Windows.Forms;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement.StartPanel;
 
 namespace ProyectoSO_Forms
 {
@@ -69,6 +70,39 @@ namespace ProyectoSO_Forms
             {
                 registerForm.ShowDialog();
             }
+        }
+
+        private void buttonDebug_Click(object sender, EventArgs e)
+        {
+            var username = "admin-forms";
+            var password = "forms";
+            var result = ServerProtocol.LoginUser(ServerHost, ServerPort, username, password);
+
+            btnLogin.Enabled = true;
+            btnRegister.Enabled = true;
+
+            if (!result.IsSuccess)
+            {
+                lblStatus.Text = "Login failed: " + result.Message;
+                return;
+            }
+
+            lblStatus.Text = "Login successful!";
+            var mainForm = new Form1(result.UserId, username, result.SkinId);
+            this.Hide();
+            mainForm.ShowDialog();
+
+            if (mainForm.LoggedOut)
+            {
+                lblStatus.Text = "";
+                txtUsername.Clear();
+                txtPassword.Clear();
+                this.Show();
+                return;
+            }
+
+            this.Close();
+
         }
     }
 }

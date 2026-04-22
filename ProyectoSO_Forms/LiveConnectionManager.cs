@@ -31,9 +31,13 @@ namespace ProyectoSO_Forms
         private const byte ReqSendChat     = 6;
         private const byte ReqJoinRoom     = 5;
         private const byte ReqLeaveRoom    = 8;
+        private const byte ReqReady        = 13;
+        private const byte ReqUnready      = 16;
         private const byte MsgUserList     = 10;
         private const byte MsgChat         = 11;
         private const byte MsgRoomState    = 12;
+        private const byte MsgCountdown    = 14;
+        private const byte MsgGameStart    = 15;
         private const int  MaxUsername     = 12;
         private const int  MaxClients      = 64;
         private const int  MaxChatMessage  = 100;
@@ -65,6 +69,12 @@ namespace ProyectoSO_Forms
         /// (roomId 1-3, players array). Subscribers must use BeginInvoke().
         /// </summary>
         public static event Action<int, string[]> OnRoomStateUpdated;
+
+        /// <summary>Fired on the network thread each countdown tick. (roomId, secondsRemaining)</summary>
+        public static event Action<int, int> OnCountdownTick;
+
+        /// <summary>Fired on the network thread when the server broadcasts game start. (roomId)</summary>
+        public static event Action<int> OnGameStartReceived;
 
         /// <summary>Last player list received from the server.</summary>
         public static List<string> LastKnownPlayers { get; private set; } = new List<string>();
@@ -164,6 +174,28 @@ namespace ProyectoSO_Forms
             if (stream == null) return;
 
             var packet = new byte[] { ReqLeaveRoom };
+            try { stream.Write(packet, 0, packet.Length); } catch { }
+        }
+
+        /// <summary>Sends REQ_READY — signals the player is ready to start the game.</summary>
+        public static void SendReady()
+        {
+            NetworkStream stream;
+            lock (_lock) { stream = _stream; }
+            if (stream == null) return;
+
+            var packet = new byte[] { ReqReady };
+            try { stream.Write(packet, 0, packet.Length); } catch { }
+        }
+
+        /// <summary>Sends REQ_UNREADY — cancels a previous ready state.</summary>
+        public static void SendUnready()
+        {
+            NetworkStream stream;
+            lock (_lock) { stream = _stream; }
+            if (stream == null) return;
+
+            var packet = new byte[] { ReqUnready };
             try { stream.Write(packet, 0, packet.Length); } catch { }
         }
 
@@ -326,6 +358,20 @@ namespace ProyectoSO_Forms
                     }
 
                     OnRoomStateUpdated?.Invoke(roomId, players);
+                }
+                else if (msgType == MsgCountdown)
+                {
+                    // Payload: room_id(1B) + seconds(1B)
+                    var cntBuf = new byte[2];
+                    if (!ReadExact(stream, cntBuf, 2)) break;
+                    OnCountdownTick?.Invoke(cntBuf[0], cntBuf[1]);
+                }
+                else if (msgType == MsgGameStart)
+                {
+                    // Payload: room_id(1B)
+                    var gsBuf = new byte[1];
+                    if (!ReadExact(stream, gsBuf, 1)) break;
+                    OnGameStartReceived?.Invoke(gsBuf[0]);
                 }
             }
         }
