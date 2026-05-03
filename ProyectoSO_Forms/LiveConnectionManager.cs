@@ -33,16 +33,19 @@ namespace ProyectoSO_Forms
         private const byte ReqLeaveRoom    = 8;
         private const byte ReqReady        = 13;
         private const byte ReqUnready      = 16;
+        private const byte ReqGameAction   = 7;
         private const byte MsgUserList     = 10;
         private const byte MsgChat         = 11;
         private const byte MsgRoomState    = 12;
         private const byte MsgCountdown    = 14;
         private const byte MsgGameStart    = 15;
+        private const byte MsgGameAction   = 17;
         private const int  MaxUsername     = 12;
         private const int  MaxClients      = 64;
         private const int  MaxChatMessage  = 100;
         private const int  MaxRoomPlayers  = 4;
         private const int  NumRooms        = 3;
+        private const int  MaxGameAction   = 512;
 
         // Protects _client/_stream from concurrent access between the UI thread
         // (Disconnect, SendChatMessage) and the network thread (ListenerLoop).
@@ -53,21 +56,17 @@ namespace ProyectoSO_Forms
         private static NetworkStream   _stream;
         private static Thread          _networkThread;
         private static string          _localUsername = "";
+        private static int             _localUserId   = 0;
+        private static int             _currentMatchId    = 0;
+        private static int             _currentPlayerCount = 0;
 
-        /// <summary>
-        /// Fired on the dedicated network thread whenever the server pushes
-        /// an updated connected-users list. Subscribers on the UI thread
-        /// must use Control.BeginInvoke() to marshal updates safely.
-        /// </summary>
+        /// <summary>Fired on the dedicated network thread whenever the server pushes an updated user list.</summary>
         public static event Action<List<string>> OnUserListUpdated;
 
         /// <summary>Fired on the network thread when the server broadcasts a chat message.</summary>
         public static event Action<string, string> OnChatMessageReceived;
 
-        /// <summary>
-        /// Fired on the network thread when a room's player list changes.
-        /// (roomId 1-3, players array). Subscribers must use BeginInvoke().
-        /// </summary>
+        /// <summary>Fired on the network thread when a room's player list changes.</summary>
         public static event Action<int, string[]> OnRoomStateUpdated;
 
         /// <summary>Fired on the network thread each countdown tick. (roomId, secondsRemaining)</summary>
@@ -75,6 +74,9 @@ namespace ProyectoSO_Forms
 
         /// <summary>Fired on the network thread when the server broadcasts game start. (roomId)</summary>
         public static event Action<int> OnGameStartReceived;
+
+        /// <summary>Fired on the network thread when a MSG_GAME_ACTION push arrives (raw JSON).</summary>
+        public static event Action<string> OnGameActionReceived;
 
         /// <summary>Last player list received from the server.</summary>
         public static List<string> LastKnownPlayers { get; private set; } = new List<string>();
@@ -85,6 +87,15 @@ namespace ProyectoSO_Forms
         /// <summary>Last known player lists per room (index 1-3; index 0 unused).</summary>
         public static string[][] RoomPlayers { get; private set; } = new string[NumRooms + 1][];
 
+        /// <summary>The user_id of the locally logged-in player.</summary>
+        public static int LocalUserId => _localUserId;
+
+        /// <summary>match_id of the current active match (set on MSG_GAME_START).</summary>
+        public static int CurrentMatchId => _currentMatchId;
+
+        /// <summary>Number of players in the current match (set on MSG_GAME_START).</summary>
+        public static int CurrentPlayerCount => _currentPlayerCount;
+
         /// <summary>
         /// Opens a persistent connection on a dedicated thread and starts
         /// listening for server-push messages. If already connected,
@@ -92,8 +103,9 @@ namespace ProyectoSO_Forms
         /// </summary>
         public static void Connect(string host, int port, string username, int userId)
         {
-            _localUsername = username;
-            CurrentRoomId  = 0;
+            _localUsername  = username;
+            _localUserId    = userId;
+            CurrentRoomId   = 0;
             for (int i = 0; i <= NumRooms; i++) RoomPlayers[i] = new string[0];
 
             Disconnect();
@@ -221,6 +233,32 @@ namespace ProyectoSO_Forms
             // Read() — .NET guarantees independent send/receive buffers.
             try { stream.Write(packet, 0, packet.Length); }
             catch { }
+        }
+
+        /// <summary>
+        /// Sends a REQ_GAME_ACTION packet.
+        /// Format: [type 1B][match_id 4B BE][user_id 4B BE][json_len 2B BE][json payload].
+        /// </summary>
+        public static void SendGameAction(int matchId, int userId, string json)
+        {
+            NetworkStream stream;
+            lock (_lock) { stream = _stream; }
+            if (stream == null) return;
+
+            var jsonBytes = Encoding.UTF8.GetBytes(json);
+            if (jsonBytes.Length > MaxGameAction) return;
+
+            var packet = new byte[1 + 4 + 4 + 2 + jsonBytes.Length];
+            packet[0] = ReqGameAction;
+            var beMid = BitConverter.GetBytes(IPAddress.HostToNetworkOrder(matchId));
+            var beUid = BitConverter.GetBytes(IPAddress.HostToNetworkOrder(userId));
+            var beLen = BitConverter.GetBytes(IPAddress.HostToNetworkOrder((short)jsonBytes.Length));
+            Array.Copy(beMid,     0, packet, 1,  4);
+            Array.Copy(beUid,     0, packet, 5,  4);
+            Array.Copy(beLen,     0, packet, 9,  2);
+            Array.Copy(jsonBytes, 0, packet, 11, jsonBytes.Length);
+
+            try { stream.Write(packet, 0, packet.Length); } catch { }
         }
 
         /// <summary>
@@ -368,10 +406,23 @@ namespace ProyectoSO_Forms
                 }
                 else if (msgType == MsgGameStart)
                 {
-                    // Payload: room_id(1B)
-                    var gsBuf = new byte[1];
-                    if (!ReadExact(stream, gsBuf, 1)) break;
-                    OnGameStartReceived?.Invoke(gsBuf[0]);
+                    // Payload: match_id(4B BE) + player_count(1B) = 5 bytes
+                    var gsBuf = new byte[5];
+                    if (!ReadExact(stream, gsBuf, 5)) break;
+                    _currentMatchId      = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(gsBuf, 0));
+                    _currentPlayerCount  = gsBuf[4];
+                    OnGameStartReceived?.Invoke(CurrentRoomId);
+                }
+                else if (msgType == MsgGameAction)
+                {
+                    // Payload: json_len(2B BE) + json
+                    var lenBuf = new byte[2];
+                    if (!ReadExact(stream, lenBuf, 2)) break;
+                    int jsonLen = (int)(ushort)IPAddress.NetworkToHostOrder(BitConverter.ToInt16(lenBuf, 0));
+                    if (jsonLen <= 0 || jsonLen > MaxGameAction) break;
+                    var jsonBuf = new byte[jsonLen];
+                    if (!ReadExact(stream, jsonBuf, jsonLen)) break;
+                    OnGameActionReceived?.Invoke(Encoding.UTF8.GetString(jsonBuf, 0, jsonLen));
                 }
             }
         }

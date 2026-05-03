@@ -33,6 +33,18 @@ namespace ProyectoSO_Forms
         private Button               _btnRollDice;
         private Label                _lblTurnStatus;
 
+        // Chair selection display (index 0-3 = yellow/red/green/blue)
+        // Order matches game activation: 2p = yellow+red, 3p adds green, 4p adds blue.
+        private static readonly string[] ChairColorKeys  = { "yellow", "red", "green", "blue" };
+        private static readonly Color[]  ChairLabelColors =
+        {
+            Color.FromArgb(200, 170, 0),
+            Color.FromArgb(200, 50,  50),
+            Color.FromArgb(40,  160, 60),
+            Color.FromArgb(60,  130, 220)
+        };
+        private readonly Button[] _chairButtons = new Button[4];
+
         private static readonly string[] ItemNames      = { "Handcuffs", "Axe", "Amp. Glass", "Smoke", "Makarov" };
         private static readonly string[] ItemNamesShort = { "Cuffs", "Axe", "A.Glass", "Smoke", "Mak." };
         private static readonly Color[]  PlayerColors   = { Color.Black, Color.SteelBlue, Color.Firebrick, Color.SeaGreen, Color.DarkOrange };
@@ -58,6 +70,7 @@ namespace ProyectoSO_Forms
             LiveConnectionManager.OnRoomStateUpdated    += OnRoomStateUpdated;
             LiveConnectionManager.OnCountdownTick       += OnCountdownTick;
             LiveConnectionManager.OnGameStartReceived   += OnGameStartReceived;
+            LiveConnectionManager.OnGameActionReceived  += OnGameActionReceived;
             LiveConnectionManager.Connect(ServerHost, ServerPort, _username, _userId);
 
             var cached = LiveConnectionManager.LastKnownPlayers;
@@ -77,6 +90,7 @@ namespace ProyectoSO_Forms
             LiveConnectionManager.OnRoomStateUpdated    -= OnRoomStateUpdated;
             LiveConnectionManager.OnCountdownTick       -= OnCountdownTick;
             LiveConnectionManager.OnGameStartReceived   -= OnGameStartReceived;
+            LiveConnectionManager.OnGameActionReceived  -= OnGameActionReceived;
             LiveConnectionManager.Disconnect();
         }
 
@@ -89,6 +103,7 @@ namespace ProyectoSO_Forms
             LiveConnectionManager.OnRoomStateUpdated    -= OnRoomStateUpdated;
             LiveConnectionManager.OnCountdownTick       -= OnCountdownTick;
             LiveConnectionManager.OnGameStartReceived   -= OnGameStartReceived;
+            LiveConnectionManager.OnGameActionReceived  -= OnGameActionReceived;
             LiveConnectionManager.Disconnect();
             this.Close();
         }
@@ -223,6 +238,9 @@ namespace ProyectoSO_Forms
                 });
             }
             groupBoxParchis.Controls.Add(boardPanel);
+
+            // Chair selection panel (top-left gap, above P3)
+            BuildChairPanel(new Point(5, 18));
 
             // Player areas around the board
             // P2 top (wide/short), P3 left, P4 right (narrow/tall), P1 us (bottom strip)
@@ -434,6 +452,52 @@ namespace ProyectoSO_Forms
                 ForeColor = Color.Gray
             };
             groupBoxParchis.Controls.Add(_lblTurnStatus);
+        }
+
+        private void BuildChairPanel(Point location)
+        {
+            var grp = new GroupBox
+            {
+                Text     = "Chairs",
+                Location = location,
+                Size     = new Size(185, 90),
+                Font     = new Font("Microsoft Sans Serif", 8f, FontStyle.Bold)
+            };
+
+            for (int i = 0; i < 4; i++)
+            {
+                int idx = i;
+                var btn = new Button
+                {
+                    Text      = $"{ChairColorKeys[i].ToUpper()}: --",
+                    Location  = new Point(6, 16 + i * 17),
+                    Size      = new Size(172, 16),
+                    Font      = new Font("Consolas", 7f),
+                    ForeColor = Color.White,
+                    BackColor = ChairLabelColors[i],
+                    FlatStyle = FlatStyle.Flat,
+                    Enabled   = false
+                };
+                btn.FlatAppearance.BorderSize = 0;
+                btn.Click += (s, e) => OnChairButtonClicked(idx);
+                _chairButtons[i] = btn;
+                grp.Controls.Add(btn);
+            }
+
+            groupBoxParchis.Controls.Add(grp);
+        }
+
+        private void OnChairButtonClicked(int colorIndex)
+        {
+            string color = ChairColorKeys[colorIndex];
+            string json  = $"{{\"action\":\"choose_chair\",\"color\":\"{color}\"}}";
+            LiveConnectionManager.SendGameAction(
+                LiveConnectionManager.CurrentMatchId,
+                LiveConnectionManager.LocalUserId,
+                json);
+            // Disable all buttons immediately — waiting for server confirmation
+            for (int i = 0; i < 4; i++)
+                if (_chairButtons[i] != null) _chairButtons[i].Enabled = false;
         }
 
         // ── Parchis state helpers ─────────────────────────────────────────────────
@@ -651,12 +715,85 @@ namespace ProyectoSO_Forms
             var statusLbl = _roomStatusLabels[roomId];
             if (statusLbl != null)
             {
-                statusLbl.Text      = "IN GAME";
+                statusLbl.Text      = $"IN GAME  (match {LiveConnectionManager.CurrentMatchId}, {LiveConnectionManager.CurrentPlayerCount}p)";
                 statusLbl.ForeColor = Color.MediumPurple;
             }
             var readyBtn = _roomReadyButtons[roomId];
             if (readyBtn != null) { readyBtn.Visible = false; readyBtn.Text = "READY"; readyBtn.BackColor = Color.FromArgb(40, 130, 40); readyBtn.Enabled = true; }
             _roomReady[roomId] = false;
+
+            // Enable only the chair slots active for this player count.
+            // ChairColorKeys: 0=yellow, 1=red, 2=green, 3=blue
+            // 2p: yellow+red (0,1)  3p: adds green (2)  4p: adds blue (3)
+            int pc = LiveConnectionManager.CurrentPlayerCount;
+            bool[] active = { true, true, pc >= 3, pc >= 4 };
+            for (int i = 0; i < 4; i++)
+            {
+                if (_chairButtons[i] == null) continue;
+                _chairButtons[i].Text      = $"{ChairColorKeys[i].ToUpper()}: --";
+                _chairButtons[i].BackColor = ChairLabelColors[i];
+                _chairButtons[i].Enabled   = active[i];
+            }
+        }
+
+        // ── Game actions ──────────────────────────────────────────────────────────
+
+        private void OnGameActionReceived(string json)
+        {
+            if (InvokeRequired) { BeginInvoke(new Action<string>(OnGameActionReceived), json); return; }
+            ApplyGameAction(json);
+        }
+
+        private void ApplyGameAction(string json)
+        {
+            string action = JsonStringValue(json, "action");
+            if (action == null) return;
+
+            if (action == "chair_taken")
+            {
+                string color    = JsonStringValue(json, "color");
+                string username = JsonStringValue(json, "username") ?? "?";
+                string userId   = JsonStringValue(json, "user_id") ?? "?";
+                if (color == null) return;
+
+                int slot = Array.IndexOf(ChairColorKeys, color);
+                if (slot < 0 || slot > 3) return;
+
+                if (_chairButtons[slot] != null)
+                {
+                    bool isMe = username == _username;
+                    _chairButtons[slot].Text    = isMe
+                        ? $"{color.ToUpper()}: You ({username})"
+                        : $"{color.ToUpper()}: {username}";
+                    _chairButtons[slot].Enabled = false;
+                    var c = ChairLabelColors[slot];
+                    _chairButtons[slot].BackColor = isMe
+                        ? c
+                        : Color.FromArgb(c.R / 2, c.G / 2, c.B / 2);
+                }
+            }
+        }
+
+        // Minimal JSON string-value extractor — no external dependency needed.
+        private static string JsonStringValue(string json, string key)
+        {
+            string needle = "\"" + key + "\":\"";
+            int idx = json.IndexOf(needle);
+            if (idx < 0)
+            {
+                // Try without quotes (numeric value as string read)
+                needle = "\"" + key + "\":";
+                idx = json.IndexOf(needle);
+                if (idx < 0) return null;
+                idx += needle.Length;
+                while (idx < json.Length && json[idx] == ' ') idx++;
+                int end = idx;
+                while (end < json.Length && json[end] != ',' && json[end] != '}') end++;
+                return json.Substring(idx, end - idx).Trim();
+            }
+            idx += needle.Length;
+            int close = json.IndexOf('"', idx);
+            return close < 0 ? null : json.Substring(idx, close - idx);
         }
     }
 }
