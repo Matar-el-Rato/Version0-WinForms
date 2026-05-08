@@ -32,6 +32,14 @@ namespace ProyectoSO_Forms
         private Button[]             _itemButtons;   // [0..4] = Handcuffs, Axe, AmpGlass, Smoke, Makarov
         private Button               _btnRollDice;
         private Label                _lblTurnStatus;
+        private Label                _lblDiceResult;
+
+        // user_id → username, populated from chair_taken events.
+        private readonly Dictionary<int, string> _usernameByUserId = new Dictionary<int, string>();
+
+        // user_id → player panel index (2–4), assigned in chair_taken order for remote players.
+        private readonly Dictionary<int, int> _playerPanelByUserId = new Dictionary<int, int>();
+        private int _nextRemotePanel = 2;
 
         // Chair selection display (index 0-3 = yellow/red/green/blue)
         // Order matches game activation: 2p = yellow+red, 3p adds green, 4p adds blue.
@@ -452,6 +460,16 @@ namespace ProyectoSO_Forms
                 ForeColor = Color.Gray
             };
             groupBoxParchis.Controls.Add(_lblTurnStatus);
+
+            _lblDiceResult = new Label
+            {
+                Text      = "",
+                Location  = new Point(origin.X + 340, origin.Y + 96),
+                Size      = new Size(240, 18),
+                Font      = new Font("Consolas", 8f),
+                ForeColor = Color.DarkOrange
+            };
+            groupBoxParchis.Controls.Add(_lblDiceResult);
         }
 
         private void BuildChairPanel(Point location)
@@ -557,7 +575,22 @@ namespace ProyectoSO_Forms
 
         private void OnRollDiceClicked(object sender, EventArgs e)
         {
-            // Stub — wire to server when game protocol is ready
+            var rng  = new Random();
+            int die1 = rng.Next(1, 7);
+            int die2 = rng.Next(1, 7);
+
+            SetOurTurn(false); // disable button until next turn_start
+            if (_lblDiceResult != null)
+            {
+                _lblDiceResult.Text      = $"You rolled {die1}, {die2} (Total: {die1 + die2})";
+                _lblDiceResult.ForeColor = Color.DarkGreen;
+            }
+
+            string json = $"{{\"action\":\"roll_dice\",\"die1\":{die1},\"die2\":{die2}}}";
+            LiveConnectionManager.SendGameAction(
+                LiveConnectionManager.CurrentMatchId,
+                LiveConnectionManager.LocalUserId,
+                json);
         }
 
         // ── Player list ───────────────────────────────────────────────────────────
@@ -721,6 +754,8 @@ namespace ProyectoSO_Forms
             var readyBtn = _roomReadyButtons[roomId];
             if (readyBtn != null) { readyBtn.Visible = false; readyBtn.Text = "READY"; readyBtn.BackColor = Color.FromArgb(40, 130, 40); readyBtn.Enabled = true; }
             _roomReady[roomId] = false;
+            _playerPanelByUserId.Clear();
+            _nextRemotePanel = 2;
 
             // Enable only the chair slots active for this player count.
             // ChairColorKeys: 0=yellow, 1=red, 2=green, 3=blue
@@ -753,8 +788,15 @@ namespace ProyectoSO_Forms
             {
                 string color    = JsonStringValue(json, "color");
                 string username = JsonStringValue(json, "username") ?? "?";
-                string userId   = JsonStringValue(json, "user_id") ?? "?";
+                string userIdStr = JsonStringValue(json, "user_id") ?? "";
                 if (color == null) return;
+
+                if (int.TryParse(userIdStr, out int uid) && uid > 0)
+                {
+                    _usernameByUserId[uid] = username;
+                    if (uid != _userId && !_playerPanelByUserId.ContainsKey(uid) && _nextRemotePanel <= 4)
+                        _playerPanelByUserId[uid] = _nextRemotePanel++;
+                }
 
                 int slot = Array.IndexOf(ChairColorKeys, color);
                 if (slot < 0 || slot > 3) return;
@@ -771,6 +813,129 @@ namespace ProyectoSO_Forms
                         ? c
                         : Color.FromArgb(c.R / 2, c.G / 2, c.B / 2);
                 }
+            }
+            else if (action == "turn_start")
+            {
+                string userIdStr = JsonStringValue(json, "user_id") ?? "";
+                if (!int.TryParse(userIdStr, out int uid)) return;
+
+                bool isOurTurn = uid == _userId;
+                SetOurTurn(isOurTurn);
+                if (!isOurTurn && _lblTurnStatus != null)
+                {
+                    string name = _usernameByUserId.TryGetValue(uid, out var n) ? n : $"#{uid}";
+                    _lblTurnStatus.Text      = $"{name}'s turn";
+                    _lblTurnStatus.ForeColor = Color.DimGray;
+                    _lblTurnStatus.Font      = new Font("Microsoft Sans Serif", 8.5f, FontStyle.Italic);
+                }
+            }
+            else if (action == "initiative_sequence")
+            {
+                ParseAndApplyItemGrants(json);
+            }
+            else if (action == "dice_result")
+            {
+                string userIdStr = JsonStringValue(json, "user_id") ?? "";
+                string die1Str   = JsonStringValue(json, "die1")    ?? "0";
+                string die2Str   = JsonStringValue(json, "die2")    ?? "0";
+                string totalStr  = JsonStringValue(json, "total")   ?? "0";
+
+                if (!int.TryParse(userIdStr, out int uid)) return;
+                if (uid == _userId) return; // we already showed our own result locally
+
+                string who = _usernameByUserId.TryGetValue(uid, out var dName) ? dName : $"#{uid}";
+                if (_lblDiceResult != null)
+                {
+                    _lblDiceResult.Text      = $"{who}: {die1Str}, {die2Str} (Total: {totalStr})";
+                    _lblDiceResult.ForeColor = Color.DarkOrange;
+                }
+            }
+        }
+
+        private void ParseAndApplyItemGrants(string json)
+        {
+            const string key = "\"item_grants\":[";
+            int start = json.IndexOf(key);
+            if (start < 0) return;
+
+            // Walk to the opening '[' and find the matching ']'.
+            start += key.Length - 1;
+            int depth = 0, end = start;
+            for (; end < json.Length; end++)
+            {
+                char c = json[end];
+                if (c == '[' || c == '{') depth++;
+                else if (c == ']' || c == '}') { if (--depth == 0) break; }
+            }
+            if (end >= json.Length) return;
+
+            string arrayContent = json.Substring(start + 1, end - start - 1);
+
+            // Parse each {user_id:N, items:[...]} grant object.
+            int i = 0;
+            while (i < arrayContent.Length)
+            {
+                int objStart = arrayContent.IndexOf('{', i);
+                if (objStart < 0) break;
+
+                int d = 0, objEnd = objStart;
+                for (; objEnd < arrayContent.Length; objEnd++)
+                {
+                    char c = arrayContent[objEnd];
+                    if (c == '{' || c == '[') d++;
+                    else if (c == '}' || c == ']') { if (--d == 0) break; }
+                }
+
+                string grantJson = arrayContent.Substring(objStart, objEnd - objStart + 1);
+                string uidStr    = JsonStringValue(grantJson, "user_id");
+                if (int.TryParse(uidStr, out int uid))
+                {
+                    bool[] items = new bool[5];
+
+                    const string itemsKey = "\"items\":[";
+                    int isStart = grantJson.IndexOf(itemsKey);
+                    if (isStart >= 0)
+                    {
+                        isStart += itemsKey.Length;
+                        int isEnd = grantJson.IndexOf(']', isStart);
+                        if (isEnd >= 0)
+                        {
+                            string itemsContent = grantJson.Substring(isStart, isEnd - isStart);
+                            int j = 0;
+                            while (j < itemsContent.Length)
+                            {
+                                int q1 = itemsContent.IndexOf('"', j);
+                                if (q1 < 0) break;
+                                int q2 = itemsContent.IndexOf('"', q1 + 1);
+                                if (q2 < 0) break;
+                                string itemName = itemsContent.Substring(q1 + 1, q2 - q1 - 1);
+                                int itemIdx     = ItemServerNameToIndex(itemName);
+                                if (itemIdx >= 0) items[itemIdx] = true;
+                                j = q2 + 1;
+                            }
+                        }
+                    }
+
+                    if (uid == _userId)
+                        SetOurItems(items);
+                    else if (_playerPanelByUserId.TryGetValue(uid, out int panelIdx))
+                        SetPlayerItems(panelIdx, items);
+                }
+
+                i = objEnd + 1;
+            }
+        }
+
+        private static int ItemServerNameToIndex(string serverName)
+        {
+            switch (serverName)
+            {
+                case "handcuffs":        return 0;
+                case "fire_axe":         return 1;
+                case "magnifying_glass": return 2;
+                case "cigarette":        return 3;
+                case "gun":              return 4;
+                default:                 return -1;
             }
         }
 
