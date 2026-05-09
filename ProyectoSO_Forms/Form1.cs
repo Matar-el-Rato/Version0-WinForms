@@ -31,8 +31,16 @@ namespace ProyectoSO_Forms
         private Label                _lblP1TurnStatus;
         private Button[]             _itemButtons;   // [0..4] = Handcuffs, Axe, AmpGlass, Smoke, Makarov
         private Button               _btnRollDice;
+        private ComboBox             _cmbPiece;
+        private Button               _btnMovePiece;
         private Label                _lblTurnStatus;
         private Label                _lblDiceResult;
+
+        // Piece movement state
+        private string               _myColor        = null;
+        private readonly int[]       _myPositions    = new int[4];   // piece_positions for our color
+        private readonly List<int>   _moveablePieces = new List<int>();
+        private bool                 _diceRolled     = false;
 
         // user_id → username, populated from chair_taken events.
         private readonly Dictionary<int, string> _usernameByUserId = new Dictionary<int, string>();
@@ -451,6 +459,33 @@ namespace ProyectoSO_Forms
             _btnRollDice.Click += OnRollDiceClicked;
             groupBoxParchis.Controls.Add(_btnRollDice);
 
+            _cmbPiece = new ComboBox
+            {
+                Location      = new Point(origin.X + 123, origin.Y + 88),
+                Size          = new Size(78, 28),
+                Font          = new Font("Microsoft Sans Serif", 8.5f),
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Enabled       = false
+            };
+            _cmbPiece.Items.AddRange(new object[] { "Piece 0", "Piece 1", "Piece 2", "Piece 3" });
+            _cmbPiece.SelectedIndex = 0;
+            _cmbPiece.SelectedIndexChanged += (s, e) => UpdateMovePieceButton();
+            groupBoxParchis.Controls.Add(_cmbPiece);
+
+            _btnMovePiece = new Button
+            {
+                Text      = "Move Piece",
+                Location  = new Point(origin.X + 209, origin.Y + 88),
+                Size      = new Size(100, 34),
+                Font      = new Font("Microsoft Sans Serif", 8.5f, FontStyle.Bold),
+                BackColor = Color.FromArgb(140, 80, 180),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Enabled   = false
+            };
+            _btnMovePiece.Click += OnMovePieceClicked;
+            groupBoxParchis.Controls.Add(_btnMovePiece);
+
             _lblTurnStatus = new Label
             {
                 Text      = "Not your turn",
@@ -566,6 +601,41 @@ namespace ProyectoSO_Forms
                 _lblP1TurnStatus.Text      = isOurTurn ? "YOUR TURN!" : "Waiting for turn...";
                 _lblP1TurnStatus.ForeColor = isOurTurn ? Color.DarkGreen : Color.Gray;
             }
+            if (!isOurTurn)
+            {
+                _diceRolled = false;
+                _moveablePieces.Clear();
+                if (_cmbPiece     != null) _cmbPiece.Enabled     = false;
+                if (_btnMovePiece != null) _btnMovePiece.Enabled = false;
+            }
+        }
+
+        private void UpdateMovePieceButton()
+        {
+            if (_btnMovePiece == null || _cmbPiece == null) return;
+            int pieceId = _cmbPiece.SelectedIndex;
+            bool canMove = _diceRolled && _moveablePieces.Contains(pieceId);
+            _btnMovePiece.Enabled   = canMove;
+            _btnMovePiece.BackColor = canMove ? Color.FromArgb(140, 80, 180) : Color.FromArgb(140, 140, 140);
+        }
+
+        private void OnMovePieceClicked(object sender, EventArgs e)
+        {
+            if (_cmbPiece == null) return;
+            int pieceId = _cmbPiece.SelectedIndex;
+            if (!_moveablePieces.Contains(pieceId)) return;
+
+            // Disable immediately to prevent double-send
+            _btnMovePiece.Enabled = false;
+            _cmbPiece.Enabled     = false;
+            _diceRolled           = false;
+            _moveablePieces.Clear();
+
+            string json = $"{{\"action\":\"move_piece\",\"piece_id\":{pieceId}}}";
+            LiveConnectionManager.SendGameAction(
+                LiveConnectionManager.CurrentMatchId,
+                LiveConnectionManager.LocalUserId,
+                json);
         }
 
         private void OnItemButtonClicked(int itemIndex)
@@ -794,7 +864,8 @@ namespace ProyectoSO_Forms
                 if (int.TryParse(userIdStr, out int uid) && uid > 0)
                 {
                     _usernameByUserId[uid] = username;
-                    if (uid != _userId && !_playerPanelByUserId.ContainsKey(uid) && _nextRemotePanel <= 4)
+                    if (uid == _userId) _myColor = color;
+                    else if (!_playerPanelByUserId.ContainsKey(uid) && _nextRemotePanel <= 4)
                         _playerPanelByUserId[uid] = _nextRemotePanel++;
                 }
 
@@ -841,14 +912,79 @@ namespace ProyectoSO_Forms
                 string totalStr  = JsonStringValue(json, "total")   ?? "0";
 
                 if (!int.TryParse(userIdStr, out int uid)) return;
-                if (uid == _userId) return; // we already showed our own result locally
 
-                string who = _usernameByUserId.TryGetValue(uid, out var dName) ? dName : $"#{uid}";
+                bool isOurs = uid == _userId;
+                string who  = isOurs ? "You" : (_usernameByUserId.TryGetValue(uid, out var dName) ? dName : $"#{uid}");
+
                 if (_lblDiceResult != null)
                 {
                     _lblDiceResult.Text      = $"{who}: {die1Str}, {die2Str} (Total: {totalStr})";
-                    _lblDiceResult.ForeColor = Color.DarkOrange;
+                    _lblDiceResult.ForeColor = isOurs ? Color.DarkGreen : Color.DarkOrange;
                 }
+
+                if (isOurs)
+                {
+                    _moveablePieces.Clear();
+                    ParseMoveablePieces(json, _moveablePieces);
+                    _diceRolled = _moveablePieces.Count > 0;
+                    if (_cmbPiece != null)
+                    {
+                        _cmbPiece.Enabled = _diceRolled;
+                        _cmbPiece.SelectedIndex = 0;
+                    }
+                    UpdateMovePieceButton();
+
+                    if (!_diceRolled && _lblDiceResult != null)
+                        _lblDiceResult.Text += "  [no moves — passing]";
+                }
+            }
+            else if (action == "piece_moved")
+            {
+                string ownerIdStr  = JsonStringValue(json, "user_id")   ?? "";
+                string pieceIdStr  = JsonStringValue(json, "piece_id")  ?? "";
+                string fromStr     = JsonStringValue(json, "from")      ?? "";
+                string toStr       = JsonStringValue(json, "to")        ?? "";
+
+                if (!int.TryParse(ownerIdStr,  out int ownerId))  return;
+                if (!int.TryParse(pieceIdStr,  out int pieceId))  return;
+                if (!int.TryParse(fromStr,      out int fromSq))  return;
+                if (!int.TryParse(toStr,        out int toSq))    return;
+
+                if (ownerId == _userId && pieceId >= 0 && pieceId < 4)
+                    _myPositions[pieceId] = toSq;
+
+                string who = ownerId == _userId ? "You" : (_usernameByUserId.TryGetValue(ownerId, out var mn) ? mn : $"#{ownerId}");
+                if (_lblDiceResult != null)
+                {
+                    _lblDiceResult.Text      = $"{who} moved piece {pieceId}: sq {fromSq} → {toSq}";
+                    _lblDiceResult.ForeColor = ownerId == _userId ? Color.DarkGreen : Color.DarkOrange;
+                }
+            }
+            else if (action == "capture")
+            {
+                string victimIdStr    = JsonStringValue(json, "victim_user_id") ?? "";
+                string victimPieceStr = JsonStringValue(json, "piece_id")       ?? "";
+                if (int.TryParse(victimIdStr,    out int vid) && vid == _userId &&
+                    int.TryParse(victimPieceStr, out int vp)  && vp >= 0 && vp < 4)
+                {
+                    _myPositions[vp] = 0; // returned to home
+                }
+            }
+        }
+
+        private static void ParseMoveablePieces(string json, List<int> result)
+        {
+            const string key = "\"moveable_pieces\":[";
+            int start = json.IndexOf(key);
+            if (start < 0) return;
+            start += key.Length;
+            int end = json.IndexOf(']', start);
+            if (end < 0) return;
+            string content = json.Substring(start, end - start);
+            foreach (var part in content.Split(','))
+            {
+                if (int.TryParse(part.Trim(), out int id))
+                    result.Add(id);
             }
         }
 
