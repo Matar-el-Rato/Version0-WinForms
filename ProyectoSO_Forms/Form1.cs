@@ -36,6 +36,11 @@ namespace ProyectoSO_Forms
         private Label                _lblTurnStatus;
         private Label                _lblDiceResult;
 
+        // Force-roll controls
+        private CheckBox             _chkForceRoll;
+        private NumericUpDown        _numForceDie1;
+        private NumericUpDown        _numForceDie2;
+
         // Piece movement state
         private string               _myColor        = null;
         private readonly int[]       _myPositions    = new int[4];   // piece_positions for our color
@@ -500,11 +505,84 @@ namespace ProyectoSO_Forms
             {
                 Text      = "",
                 Location  = new Point(origin.X + 340, origin.Y + 96),
-                Size      = new Size(240, 18),
+                Size      = new Size(200, 18),
                 Font      = new Font("Consolas", 8f),
                 ForeColor = Color.DarkOrange
             };
             groupBoxParchis.Controls.Add(_lblDiceResult);
+
+            // ── Force-roll panel — right of turn-actions row, below items ────
+            // Items end at x≈600; turn-actions row starts at origin.Y+60.
+            // Place at x=604 so we clear all item buttons entirely.
+            var grpForce = new GroupBox
+            {
+                Text      = "Force Roll",
+                Location  = new Point(604, origin.Y + 60),
+                Size      = new Size(133, 65),
+                Font      = new Font("Microsoft Sans Serif", 7.5f, FontStyle.Bold),
+                ForeColor = Color.DarkRed
+            };
+
+            _chkForceRoll = new CheckBox
+            {
+                Text      = "Use fixed dice",
+                Location  = new Point(4, 14),
+                Size      = new Size(124, 16),
+                Font      = new Font("Microsoft Sans Serif", 7.5f),
+                ForeColor = Color.Black,
+                Checked   = false
+            };
+            _chkForceRoll.CheckedChanged += (s, e) =>
+            {
+                bool on = _chkForceRoll.Checked;
+                _numForceDie1.Enabled = on;
+                _numForceDie2.Enabled = on;
+                if (_btnRollDice != null)
+                    _btnRollDice.Text = on ? "Force Roll" : "Roll Dice";
+            };
+            grpForce.Controls.Add(_chkForceRoll);
+
+            grpForce.Controls.Add(new Label
+            {
+                Text      = "D1:",
+                Location  = new Point(4, 37),
+                Size      = new Size(22, 15),
+                Font      = new Font("Microsoft Sans Serif", 7.5f),
+                ForeColor = Color.Black
+            });
+            _numForceDie1 = new NumericUpDown
+            {
+                Minimum  = 1,
+                Maximum  = 6,
+                Value    = 6,
+                Location = new Point(27, 35),
+                Size     = new Size(36, 20),
+                Font     = new Font("Microsoft Sans Serif", 8f),
+                Enabled  = false
+            };
+            grpForce.Controls.Add(_numForceDie1);
+
+            grpForce.Controls.Add(new Label
+            {
+                Text      = "D2:",
+                Location  = new Point(67, 37),
+                Size      = new Size(22, 15),
+                Font      = new Font("Microsoft Sans Serif", 7.5f),
+                ForeColor = Color.Black
+            });
+            _numForceDie2 = new NumericUpDown
+            {
+                Minimum  = 1,
+                Maximum  = 6,
+                Value    = 6,
+                Location = new Point(90, 35),
+                Size     = new Size(36, 20),
+                Font     = new Font("Microsoft Sans Serif", 8f),
+                Enabled  = false
+            };
+            grpForce.Controls.Add(_numForceDie2);
+
+            groupBoxParchis.Controls.Add(grpForce);
         }
 
         private void BuildChairPanel(Point location)
@@ -645,15 +723,26 @@ namespace ProyectoSO_Forms
 
         private void OnRollDiceClicked(object sender, EventArgs e)
         {
-            var rng  = new Random();
-            int die1 = rng.Next(1, 7);
-            int die2 = rng.Next(1, 7);
+            int die1, die2;
+            bool forced = _chkForceRoll?.Checked == true;
+            if (forced)
+            {
+                die1 = (int)_numForceDie1.Value;
+                die2 = (int)_numForceDie2.Value;
+            }
+            else
+            {
+                var rng = new Random();
+                die1 = rng.Next(1, 7);
+                die2 = rng.Next(1, 7);
+            }
 
             SetOurTurn(false); // disable button until next turn_start
             if (_lblDiceResult != null)
             {
-                _lblDiceResult.Text      = $"You rolled {die1}, {die2} (Total: {die1 + die2})";
-                _lblDiceResult.ForeColor = Color.DarkGreen;
+                string tag = forced ? " [FORCED]" : "";
+                _lblDiceResult.Text      = $"You rolled {die1}, {die2} (Total: {die1 + die2}){tag}";
+                _lblDiceResult.ForeColor = forced ? Color.DarkRed : Color.DarkGreen;
             }
 
             string json = $"{{\"action\":\"roll_dice\",\"die1\":{die1},\"die2\":{die2}}}";
